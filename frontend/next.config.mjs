@@ -36,7 +36,7 @@ const nextConfig = {
     root: monorepoRoot,
   },
   async rewrites() {
-    // Netlify edge redirects in netlify.toml proxy /api-proxy; Next rewrites conflict and 500.
+    // Netlify uses the server route at /api-proxy; Next rewrites are for local development.
     if (isNetlify) return [];
     const origin = backendOrigin.replace(/\/+$/, "");
     return [

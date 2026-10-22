@@ -13,12 +13,6 @@
   BACKEND_ORIGIN = "https://fleetops-fijg.onrender.com"
 
 [[redirects]]
-  from = "/api-proxy/*"
-  to = "https://fleetops-fijg.onrender.com/api/:splat"
-  status = 200
-  force = true
-
-[[redirects]]
   from = "/uploads/*"
   to = "https://fleetops-fijg.onrender.com/uploads/:splat"
   status = 200
