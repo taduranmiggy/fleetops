@@ -27,6 +27,9 @@ services:
     dockerfilePath: ./Dockerfile
     dockerContext: .
     dockerCommand: python run_server.py
+    # Explicitly keep the public onrender.com hostname attached on existing
+    # services. When omitted, Render retains the prior service setting.
+    renderSubdomainPolicy: enabled
     autoDeployTrigger: commit
     healthCheckPath: /health
     disk:
