@@ -8,19 +8,19 @@
 
 [build.environment]
   NODE_VERSION = "20"
-  # Temporary production fallback while Render's public subdomain is returning
-  # x-render-routing: no-server before FastAPI receives requests.
-  NEXT_PUBLIC_API_URL = "https://fleetops-production-b2b7.up.railway.app/api"
-  BACKEND_ORIGIN = "https://fleetops-production-b2b7.up.railway.app"
+  # Render's public API is reachable in browsers, but Netlify's edge cannot
+  # currently route to it. Use the API directly and rely on the API CORS allowlist.
+  NEXT_PUBLIC_API_URL = "https://fleetops-fijg.onrender.com/api"
+  BACKEND_ORIGIN = "https://fleetops-fijg.onrender.com"
 
 [[redirects]]
   from = "/api-proxy/*"
-  to = "https://fleetops-production-b2b7.up.railway.app/api/:splat"
+  to = "https://fleetops-fijg.onrender.com/api/:splat"
   status = 200
   force = true
 
 [[redirects]]
   from = "/uploads/*"
-  to = "https://fleetops-production-b2b7.up.railway.app/uploads/:splat"
+  to = "https://fleetops-fijg.onrender.com/uploads/:splat"
   status = 200
   force = true
