@@ -10,16 +10,16 @@
   NODE_VERSION = "20"
   # Keep browser API requests same-origin; Netlify proxies them to Render.
   NEXT_PUBLIC_API_URL = "/api-proxy"
-  BACKEND_ORIGIN = "https://fleetops-f1jg.onrender.com"
+  BACKEND_ORIGIN = "https://fleetops-fijg.onrender.com"
 
 [[redirects]]
   from = "/api-proxy/*"
-  to = "https://fleetops-f1jg.onrender.com/api/:splat"
+  to = "https://fleetops-fijg.onrender.com/api/:splat"
   status = 200
   force = true
 
 [[redirects]]
   from = "/uploads/*"
-  to = "https://fleetops-f1jg.onrender.com/uploads/:splat"
+  to = "https://fleetops-fijg.onrender.com/uploads/:splat"
   status = 200
   force = true
