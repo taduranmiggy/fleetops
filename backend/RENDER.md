@@ -102,6 +102,7 @@ database dump contains only their stored paths, not the files themselves.
 
 | Log / symptom | Fix |
 |---|---|
+| `Access denied for user 'fleetopt'@'10.x.x.x' (using password: YES)` | The API can reach MySQL, but its password differs from the password used when MySQL first initialized its persistent disk. In `fleetops-api` → Environment, remove any stale `DATABASE_URL` and set `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_DATABASE`, `MYSQL_USER`, and `MYSQL_PASSWORD` to the exact current values used by `fleetops-mysql`; then redeploy the API. Do not regenerate `MYSQL_PASSWORD` after MySQL has initialized. If the original database password was lost, connect to the MySQL service with its root password and run `ALTER USER 'fleetopt'@'%' IDENTIFIED BY 'NEW_SHARED_PASSWORD'; GRANT ALL PRIVILEGES ON fleetopt.* TO 'fleetopt'@'%'; FLUSH PRIVILEGES;`, then set that same `NEW_SHARED_PASSWORD` on the API and redeploy it. |
 | API deploy fails with migration errors | Open `fleetops-mysql` logs first. First boot can take a few minutes; the API retries for five minutes, then Render will retry the deploy. |
 | `/health` OK, `/ready` fails | Confirm `MYSQL_HOST` comes from the private service and `MYSQL_PORT` is `3306`, not Render's HTTP `PORT`. |
 | `ValidationError` on `SECRET_KEY` | Let the Blueprint generate it, or paste a 32+ character secret. |

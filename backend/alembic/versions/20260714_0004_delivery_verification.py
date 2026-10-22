@@ -4,7 +4,9 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "20260714_0004_delivery_verification"
+# Alembic's default `alembic_version.version_num` column is VARCHAR(32).
+# Keep revision identifiers within that limit so MySQL can record upgrades.
+revision = "20260714_0004_delivery_verify"
 down_revision = "20260607_0003_toll_plaza_aliases"
 branch_labels = None
 depends_on = None
