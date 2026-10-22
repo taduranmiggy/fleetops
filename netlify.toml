@@ -8,9 +8,8 @@
 
 [build.environment]
   NODE_VERSION = "20"
-  # Render's public API is reachable in browsers, but Netlify's edge cannot
-  # currently route to it. Use the API directly and rely on the API CORS allowlist.
-  NEXT_PUBLIC_API_URL = "https://fleetops-fijg.onrender.com/api"
+  # Keep browser requests same-origin; the Next.js route proxies them to the API.
+  NEXT_PUBLIC_API_URL = "/api-proxy"
   BACKEND_ORIGIN = "https://fleetops-fijg.onrender.com"
 
 [[redirects]]

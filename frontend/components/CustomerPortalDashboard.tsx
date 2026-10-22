@@ -82,6 +82,7 @@ export default function CustomerPortalDashboard() {
     completed: false,
     cancelled: false,
   });
+  const [showDeliveryVerification, setShowDeliveryVerification] = useState(false);
   const [sectionPages, setSectionPages] = useState<Record<string, number>>({
     pending: 0,
     ongoing: 0,
@@ -359,16 +360,31 @@ export default function CustomerPortalDashboard() {
               <KpiCard label="Fulfillment snapshot" value={`${kpis.rate}%`} delta="Completed vs all bookings" trend={kpis.rate >= 90 ? "up" : "flat"} tone={kpis.rate >= 90 ? "success" : "neutral"} />
             </section>
 
-            <section id="customer-delivery-verification" className="card scroll-section" style={{ display: "grid", gap: "1rem" }}>
-              <div>
-                <h2 style={{ margin: 0 }}>Delivery Verification</h2>
-                <p style={{ margin: "0.35rem 0 0", color: "var(--text-secondary)", fontSize: "0.9rem" }}>
-                  Show this QR or read the Verification Code to your helper at the destination to complete the booking.
-                  This is the only credential they need.
-                </p>
+            <section id="customer-delivery-verification" className="card scroll-section" style={{ display: "grid", gap: showDeliveryVerification ? "1rem" : "0.5rem" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
+                <div>
+                  <h2 style={{ margin: 0 }}>Delivery Verification</h2>
+                  <p style={{ margin: "0.35rem 0 0", color: "var(--text-secondary)", fontSize: "0.9rem" }}>
+                    {activeShow.some((order) => order.delivery_verification_active)
+                      ? "Your QR codes and backup codes are ready when your shipment arrives."
+                      : "QR codes and backup codes appear here after payment is verified."}
+                  </p>
+                </div>
+                {activeShow.some((order) => order.delivery_verification_active) ? (
+                  <button
+                    type="button"
+                    className="button"
+                    aria-expanded={showDeliveryVerification}
+                    aria-controls="customer-delivery-verification-cards"
+                    onClick={() => setShowDeliveryVerification((open) => !open)}
+                    style={{ minHeight: 0, padding: "0.55rem 0.8rem", whiteSpace: "nowrap" }}
+                  >
+                    {showDeliveryVerification ? "Hide codes" : `Show codes (${activeShow.filter((order) => order.delivery_verification_active).length})`}
+                  </button>
+                ) : null}
               </div>
-              {activeShow.some((order) => order.delivery_verification_active) ? (
-                <div className="safe-auto-grid-300">
+              {showDeliveryVerification && activeShow.some((order) => order.delivery_verification_active) ? (
+                <div id="customer-delivery-verification-cards" className="safe-auto-grid-300">
                   {activeShow
                     .filter((order) => order.delivery_verification_active)
                     .map((order) => (
@@ -383,11 +399,7 @@ export default function CustomerPortalDashboard() {
                       />
                     ))}
                 </div>
-              ) : (
-                <p style={{ margin: 0, color: "var(--text-secondary)" }}>
-                  No active delivery credentials. A QR Code and backup Verification Code will appear here after payment is verified.
-                </p>
-              )}
+              ) : null}
             </section>
 
             <section className="dashboard-standard-grid">
