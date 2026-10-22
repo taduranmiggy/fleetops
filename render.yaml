@@ -1,0 +1,80 @@
+# FleetOpt on Render: public API + private MySQL.
+# Disks and private networking require paid compute (not the free web plan).
+services:
+  - type: pserv
+    name: fleetops-mysql
+    runtime: image
+    image:
+      url: docker.io/library/mysql:8.0
+    plan: 0.5c-512mb
+    region: singapore
+    autoDeployTrigger: off
+    disk:
+      name: fleetops-mysql-data
+      mountPath: /var/lib/mysql
+      sizeGB: 10
+    envVars:
+      - fromGroup: fleetops-mysql-app
+      - key: MYSQL_ROOT_PASSWORD
+        generateValue: true
+
+  - type: web
+    name: fleetops-api
+    runtime: docker
+    plan: 1c-2g
+    region: singapore
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: python run_server.py
+    autoDeployTrigger: commit
+    healthCheckPath: /health
+    disk:
+      name: fleetops-uploads
+      mountPath: /app/uploads
+      sizeGB: 10
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "1440"
+      - key: MIGRATION_MAX_ATTEMPTS
+        value: "60"
+      - key: MIGRATION_RETRY_SECONDS
+        value: "5"
+      - key: REQUIRE_MIGRATIONS
+        value: "true"
+      - key: FRONTEND_URL
+        value: https://fleetops.netlify.app
+      - key: CORS_ORIGINS
+        value: https://fleetops.netlify.app
+      - key: UPLOADS_ROOT
+        value: /app/uploads
+      - key: USE_CLERK_AUTH
+        value: "false"
+      - key: DIESEL_PRICE_PHP_PER_LITER
+        value: "74.75"
+      - key: TOLL_FEES_PHP_PER_TRIP
+        value: "0"
+      - key: EMAIL_FROM
+        value: FleetOpt <noreply@deliverexapp.com>
+      - key: MYSQL_HOST
+        fromService:
+          type: pserv
+          name: fleetops-mysql
+          property: host
+      - key: MYSQL_PORT
+        value: "3306"
+      - fromGroup: fleetops-mysql-app
+
+envVarGroups:
+  - name: fleetops-mysql-app
+    envVars:
+      - key: MYSQL_DATABASE
+        value: fleetopt
+      - key: MYSQL_USER
+        value: fleetopt
+      - key: MYSQL_PASSWORD
+        generateValue: true

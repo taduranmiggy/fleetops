@@ -78,6 +78,19 @@ app.add_middleware(
 )
 
 
+@app.api_route("/", methods=["GET", "HEAD"])
+def root() -> dict:
+    """Small public landing route for deployment and path verification."""
+    return {
+        "name": settings.app_name,
+        "status": "ok",
+        "health": "/health",
+        "readiness": "/ready",
+        "docs": "/docs",
+        "api_prefix": "/api",
+    }
+
+
 @app.on_event("startup")
 def startup() -> None:
     uploads_root()

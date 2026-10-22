@@ -67,14 +67,36 @@ Notes:
 | `https://YOUR-RAILWAY-DOMAIN/health` | `{"status":"ok"}` |
 | `https://YOUR-RAILWAY-DOMAIN/ready` | `{"status":"ready"}` |
 
-## Vercel frontend (same project)
+Run the `/health` check against the exact domain shown in Railway under
+**Settings → Networking → Public Networking**. If Railway returns its own
+`404` response with `"message":"Application not found"`, that hostname is
+stale or is no longer attached to the service. Generate/restore a public
+domain in Railway before changing CORS settings; an unreachable hostname can
+look like a CORS failure in the browser because Railway's fallback response
+does not include your API's CORS headers.
+
+## Netlify frontend
+
+The production browser should use Netlify as a same-origin API proxy:
 
 ```
-NEXT_PUBLIC_API_URL=https://YOUR-RAILWAY-DOMAIN/api
+NEXT_PUBLIC_API_URL=/api-proxy
 BACKEND_ORIGIN=https://YOUR-RAILWAY-DOMAIN
 ```
 
-Redeploy Vercel after saving env vars.
+1. Copy the active Railway public domain from **Settings → Networking**.
+2. In the repository root [`netlify.toml`](../netlify.toml), replace every
+   Railway hostname in `BACKEND_ORIGIN` and the `/api-proxy/*` and `/uploads/*`
+   proxy destinations. Do not add `/api` to `BACKEND_ORIGIN`.
+3. In Railway Variables, set both `FRONTEND_URL` and `CORS_ORIGINS` to the
+   exact Netlify production origin (`https://fleetops.netlify.app`). This is
+   also used for password-reset and payment redirect links.
+4. Redeploy Railway, verify `/health`, then redeploy Netlify so its build and
+   proxy rules use the current backend domain.
+
+The browser URL becomes `/api-proxy/auth/login`; Netlify forwards it to
+`https://YOUR-RAILWAY-DOMAIN/api/auth/login`. Because the browser talks to its
+own Netlify origin, routine API requests do not depend on cross-origin CORS.
 
 ## Troubleshooting
 
@@ -82,9 +104,12 @@ Redeploy Vercel after saving env vars.
 |---------------|-----|
 | Console says **container is not running (exited)** | Open **Deployments → View Logs** (not Console). Fix env vars below, then redeploy. |
 | `ValidationError` on `SECRET_KEY` / `FRONTEND_URL` | Set all vars in `railway.env.example` |
+| Railway response says `Application not found` | The configured Railway hostname is detached/stale. Generate or restore the service's public domain, update every Railway hostname in `netlify.toml`, then redeploy Netlify. |
+| Browser reports CORS and the API response is Railway `404` | Fix the Railway public domain first. This response is from Railway's edge, not FastAPI, so changing `CORS_ORIGINS` alone cannot fix it. |
+| Browser reports CORS but Railway `/health` is `200` | Set Railway `FRONTEND_URL` and `CORS_ORIGINS` to the exact Netlify origin (currently `https://fleetops.netlify.app`), then redeploy Railway. |
 | `No module named 'app'` | Root Directory must be `backend` |
 | `/health` OK, `/ready` fails | Check `DATABASE_URL` uses internal `mysql.railway.internal` URL |
 | `'$PORT' is not a valid integer` | Clear Custom Start Command; remove bad `PORT` variable; use Dockerfile + `railway.toml` |
-| Login works locally but not on Vercel | Redeploy Vercel; confirm `NEXT_PUBLIC_API_URL` ends with `/api` |
+| Login works locally but not on Netlify | Verify Railway `/health`, confirm `NEXT_PUBLIC_API_URL=/api-proxy`, and redeploy Netlify after changing `netlify.toml`. |
 | Helper proofs upload OK but images 404 later | Mount a **Railway Volume** at `/app/uploads` (`UPLOADS_ROOT`). Ephemeral disk loses files on redeploy. |
 | Uploads 404 on Netlify | Confirm `netlify.toml` proxies `/uploads/*` to Railway `BACKEND_ORIGIN` |
