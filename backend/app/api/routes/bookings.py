@@ -2,7 +2,7 @@ from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user, require_roles
@@ -506,10 +506,59 @@ def booking_schedule_availability(
     dropoff_location: str = Query(default=""),
 ):
     """Open slots require truck-count capacity plus free trucks, drivers, and helpers for the window."""
+    from app.models.entities import BookingStatus, User, UserRole
+    from app.services.booking_capacity import fleet_operational_pool_size
+    from app.services.demo_booking_filter import demo_booking_orm_filter
+
     required_trucks = trucks_required_for_cargo(cargo_weight_tons)
     has_route = len(pickup_location.strip()) >= 3 and len(dropoff_location.strip()) >= 3
     pickup = pickup_location.strip() if has_route else ""
     dropoff = dropoff_location.strip() if has_route else ""
+
+    active_booking_exists = db.query(Booking.id).filter(
+        Booking.status.notin_(
+            {
+                BookingStatus.CANCELLED,
+                BookingStatus.REJECTED,
+                BookingStatus.PAYMENT_REJECTED,
+                BookingStatus.COMPLETED,
+                BookingStatus.EXPIRED,
+            }
+        ),
+        ~demo_booking_orm_filter(Booking.pickup_location, Booking.dropoff_location),
+    ).first() is not None
+
+    # With no active workflow rows, route distance cannot affect capacity. Avoid
+    # external geocoding/routing calls so a fresh demo database remains usable
+    # even when map providers are slow or unavailable.
+    if not active_booking_exists:
+        off_duty = {"off_duty", "off-duty", "on_break", "break", "unavailable"}
+        truck_count = fleet_operational_pool_size(db)
+        driver_count = int(
+            db.query(User.id)
+            .filter(
+                User.role == UserRole.DRIVER,
+                ~func.lower(func.coalesce(User.availability_status, "")).in_(off_duty),
+            )
+            .count()
+        )
+        helper_count = int(
+            db.query(User.id)
+            .filter(
+                User.role == UserRole.HELPER,
+                ~func.lower(func.coalesce(User.availability_status, "")).in_(off_duty),
+            )
+            .count()
+        )
+        free_capacity = min(truck_count, driver_count, helper_count)
+        slots = {slot: free_capacity >= required_trucks for slot in BOOKING_TIME_SLOTS}
+        available_by_slot = {slot: free_capacity for slot in BOOKING_TIME_SLOTS}
+        return BookingScheduleAvailabilityRead(
+            scheduled_date=scheduled_date,
+            slots=slots,
+            required_trucks=required_trucks,
+            available_trucks_by_slot=available_by_slot,
+        )
 
     if has_route:
         slots = availability_for_date(
