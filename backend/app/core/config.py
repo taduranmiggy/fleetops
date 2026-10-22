@@ -262,6 +262,10 @@ class Settings(BaseSettings):
     def allowed_cors_origins(self) -> list[str]:
         env = (self.app_env or "").strip().lower()
         local_dev = {"http://localhost:3000", "http://127.0.0.1:3000"}
+        # The production frontend is hosted on Netlify. Keep this narrow
+        # fallback so browser access remains available if a manually created
+        # Render service is missing FRONTEND_URL/CORS_ORIGINS.
+        production_frontend_origins = {"https://fleetops.netlify.app"}
         origins: list[str] = []
 
         raw = (self.cors_origins or "").strip()
@@ -279,6 +283,10 @@ class Settings(BaseSettings):
             for local in local_dev:
                 if local not in origins:
                     origins.append(local)
+        else:
+            for production_origin in production_frontend_origins:
+                if production_origin not in origins:
+                    origins.append(production_origin)
 
         return origins
 
