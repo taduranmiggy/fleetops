@@ -10,6 +10,7 @@ const monorepoRoot = path.resolve(configDir, "..");
 
 const isProd = process.env.NODE_ENV === "production";
 const requiredProdVars = ["NEXT_PUBLIC_API_URL", "BACKEND_ORIGIN"];
+const configuredBackendOrigin = (process.env.BACKEND_ORIGIN || "").trim();
 if (isProd) {
   const missing = requiredProdVars.filter((key) => !(process.env[key] || "").trim());
   if (missing.length) {
@@ -24,9 +25,37 @@ if (isProd) {
       "NEXT_PUBLIC_API_URL must be an HTTPS URL or `/api-proxy` in production.",
     );
   }
+  let backendUrl;
+  try {
+    backendUrl = new URL(configuredBackendOrigin);
+  } catch {
+    throw new Error("BACKEND_ORIGIN must be a complete HTTPS URL in production.");
+  }
+  const backendHost = backendUrl.hostname.toLowerCase();
+  if (
+    backendUrl.protocol !== "https:" ||
+    backendHost === "localhost" ||
+    backendHost.endsWith(".localhost") ||
+    /^127(?:\.\d{1,3}){3}$/.test(backendHost) ||
+    backendHost === "::1" ||
+    backendHost === "[::1]"
+  ) {
+    throw new Error(
+      "BACKEND_ORIGIN must use the deployed backend's public HTTPS origin, not localhost.",
+    );
+  }
+  if (
+    backendUrl.pathname !== "/" ||
+    backendUrl.search ||
+    backendUrl.hash ||
+    backendUrl.username ||
+    backendUrl.password
+  ) {
+    throw new Error("BACKEND_ORIGIN must contain only the HTTPS origin, without a path or credentials.");
+  }
 }
 
-const backendOrigin = process.env.BACKEND_ORIGIN || "http://127.0.0.1:8000";
+const backendOrigin = configuredBackendOrigin || (isProd ? "" : "http://127.0.0.1:8000");
 const isNetlify = process.env.NETLIFY === "true";
 /** @type {import('next').NextConfig} */
 const nextConfig = {

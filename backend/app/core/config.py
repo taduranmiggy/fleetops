@@ -1,4 +1,7 @@
+import ipaddress
+import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -14,10 +17,48 @@ def normalize_mysql_url(url: str) -> str:
     return cleaned
 
 
+_HOSTED_ENVIRONMENT_MARKERS = (
+    "RAILWAY_PROJECT_ID",
+    "RAILWAY_ENVIRONMENT_ID",
+    "RAILWAY_SERVICE_ID",
+    "RENDER_EXTERNAL_HOSTNAME",
+    "RENDER_SERVICE_ID",
+)
+
+
+def default_app_environment() -> str:
+    """Treat recognized hosting platforms as production by default."""
+    if is_hosted_environment():
+        return "production"
+    return "development"
+
+
+def is_hosted_environment() -> bool:
+    """Return whether the current process is running on a known host."""
+    return any((os.getenv(name) or "").strip() for name in _HOSTED_ENVIRONMENT_MARKERS)
+
+
+def is_loopback_database_url(url: str) -> bool:
+    """Return whether a database URL points back at the current container."""
+    try:
+        host = (urlsplit(url).hostname or "").strip().rstrip(".").lower()
+    except ValueError:
+        return False
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 class Settings(BaseSettings):
     # Application
     app_name: str = "FleetOpt API"
-    app_env: str = Field(default="development", description="Environment: development, staging, production")
+    app_env: str = Field(
+        default_factory=default_app_environment,
+        description="Environment: development, staging, production",
+    )
 
     # JWT secret — must be 32+ chars in production
     secret_key: str = Field(
@@ -223,8 +264,14 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_production_requirements(self):
         env = (self.app_env or "").strip().lower()
-        if env != "production":
+        hosted = is_hosted_environment()
+        if env != "production" and not hosted:
             return self
+
+        # A stale APP_ENV=development must never weaken hosted safeguards.
+        # Keep the effective value consistent for the rest of the application.
+        if hosted:
+            self.app_env = "production"
 
         missing: list[str] = []
         if not self.secret_key:
@@ -238,6 +285,13 @@ class Settings(BaseSettings):
 
         if self.secret_key == "dev-key-change-in-production":
             raise ValueError("SECRET_KEY must not use the development default in production.")
+        if len(self.secret_key) < 32:
+            raise ValueError("SECRET_KEY must be at least 32 characters in production.")
+        if is_loopback_database_url(self.database_url):
+            raise ValueError(
+                "Production DATABASE_URL must not target localhost or another loopback address. "
+                "In Railway, reference the MySQL service's MYSQL_URL."
+            )
         lowered = [o.lower() for o in self.allowed_cors_origins]
         if any("localhost" in o or "127.0.0.1" in o for o in lowered):
             raise ValueError(

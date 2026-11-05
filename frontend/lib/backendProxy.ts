@@ -14,7 +14,44 @@ const HOP_BY_HOP = new Set([
 ]);
 
 export function backendOrigin(): string {
-  return (process.env.BACKEND_ORIGIN || "http://127.0.0.1:8000").replace(/\/+$/, "");
+  const configured = (process.env.BACKEND_ORIGIN || "").trim();
+  if (configured) {
+    let parsed: URL;
+    try {
+      parsed = new URL(configured);
+    } catch {
+      throw new Error("BACKEND_ORIGIN must be a complete URL.");
+    }
+    const host = parsed.hostname.toLowerCase();
+    if (process.env.NODE_ENV === "production") {
+      if (
+        parsed.protocol !== "https:" ||
+        host === "localhost" ||
+        host.endsWith(".localhost") ||
+        /^127(?:\.\d{1,3}){3}$/.test(host) ||
+        host === "::1" ||
+        host === "[::1]"
+      ) {
+        throw new Error("Production BACKEND_ORIGIN must be a non-local HTTPS URL.");
+      }
+      if (
+        parsed.pathname !== "/" ||
+        parsed.search ||
+        parsed.hash ||
+        parsed.username ||
+        parsed.password
+      ) {
+        throw new Error(
+          "Production BACKEND_ORIGIN must contain only the HTTPS origin, without a path or credentials.",
+        );
+      }
+    }
+    return parsed.origin;
+  }
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("BACKEND_ORIGIN is required in production.");
+  }
+  return "http://127.0.0.1:8000";
 }
 
 export async function proxyToBackend(req: NextRequest, backendPath: string): Promise<Response> {

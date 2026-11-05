@@ -2,25 +2,119 @@
 from __future__ import annotations
 
 from collections.abc import MutableMapping
+import ipaddress
 import os
 import subprocess
 import sys
 import time
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlsplit
+
+
+class DatabaseConfigurationError(RuntimeError):
+    """Raised when a hosted deployment has no safe MySQL target."""
+
+
+_HOSTED_ENVIRONMENT_MARKERS = (
+    "RAILWAY_PROJECT_ID",
+    "RAILWAY_ENVIRONMENT_ID",
+    "RAILWAY_SERVICE_ID",
+    "RENDER_EXTERNAL_HOSTNAME",
+    "RENDER_SERVICE_ID",
+)
+
+
+def is_hosted_environment(env: MutableMapping[str, str] | None = None) -> bool:
+    """Return whether this process is running as a hosted deployment."""
+    values = os.environ if env is None else env
+    app_env = (values.get("APP_ENV") or "").strip().lower()
+    if app_env in {"production", "staging"}:
+        return True
+    return any((values.get(name) or "").strip() for name in _HOSTED_ENVIRONMENT_MARKERS)
+
+
+def _normalize_mysql_url(url: str) -> str:
+    cleaned = url.strip()
+    if cleaned.startswith("mysql://"):
+        return f"mysql+pymysql://{cleaned[len('mysql://'):]}"
+    return cleaned
+
+
+def _is_loopback_host(host: str) -> bool:
+    cleaned = host.strip().rstrip(".").lower()
+    if cleaned == "localhost" or cleaned.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(cleaned).is_loopback
+    except ValueError:
+        return False
+
+
+def _validate_hosted_database_url(url: str) -> None:
+    """Reject unresolved, malformed, or local URLs in hosted environments."""
+    if "${{" in url or "}}" in url:
+        raise DatabaseConfigurationError(
+            "DATABASE_URL contains an unresolved Railway reference. Use Railway's "
+            "variable picker and the exact MySQL service name."
+        )
+
+    try:
+        parsed = urlsplit(url)
+        hostname = parsed.hostname
+    except ValueError as exc:
+        raise DatabaseConfigurationError(
+            "DATABASE_URL is malformed. In Railway, set it with the MySQL service's "
+            "MYSQL_URL reference."
+        ) from exc
+    database = parsed.path.lstrip("/").split("/", 1)[0]
+    if (
+        parsed.scheme not in {"mysql", "mysql+pymysql"}
+        or not hostname
+        or not parsed.username
+        or not database
+    ):
+        raise DatabaseConfigurationError(
+            "DATABASE_URL must be a complete MySQL URL. In Railway, set it to "
+            "${{<MYSQL_SERVICE_NAME>.MYSQL_URL}}."
+        )
+    if _is_loopback_host(hostname):
+        raise DatabaseConfigurationError(
+            "A hosted deployment cannot use a localhost/loopback MySQL host. "
+            "Remove the local DATABASE_URL and reference the Railway MySQL service: "
+            "${{<MYSQL_SERVICE_NAME>.MYSQL_URL}}. The application will not fall back "
+            "to localhost."
+        )
+
+
+def database_target(url: str) -> str:
+    """Return a credential-free database target for startup logs."""
+    parsed = urlsplit(url)
+    host = parsed.hostname or "unknown-host"
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
+    database = parsed.path.lstrip("/").split("/", 1)[0] or "unknown-database"
+    return f"{host}:{port or 3306}/{database}"
 
 
 def configure_database_url(env: MutableMapping[str, str] | None = None) -> str | None:
     """Build ``DATABASE_URL`` from discrete MySQL variables when needed.
 
     Railway and external providers can continue supplying ``DATABASE_URL``
-    directly. Railway's MySQL plugin uses names without underscores
-    (``MYSQLHOST``, ``MYSQLUSER``, etc.), while Render's Blueprint supplies
-    underscored names, so both forms are supported.
+    directly. ``MYSQL_URL`` and both the underscored and Railway-style
+    discrete MySQL variables are also supported. Hosted deployments fail
+    closed instead of silently using the application's localhost dev default.
     """
     values = os.environ if env is None else env
     existing = (values.get("DATABASE_URL") or "").strip()
-    if existing:
-        return existing
+    railway_mysql_url = (values.get("MYSQL_URL") or "").strip()
+    supplied_url = existing or railway_mysql_url
+    if supplied_url:
+        resolved = _normalize_mysql_url(supplied_url)
+        if is_hosted_environment(values):
+            _validate_hosted_database_url(resolved)
+        values["DATABASE_URL"] = resolved
+        return resolved
 
     def first_value(*names: str) -> str:
         for name in names:
@@ -33,6 +127,21 @@ def configure_database_url(env: MutableMapping[str, str] | None = None) -> str |
     user = first_value("MYSQL_USER", "MYSQLUSER")
     database = first_value("MYSQL_DATABASE", "MYSQLDATABASE")
     if not host or not user or not database:
+        if is_hosted_environment(values):
+            missing: list[str] = []
+            if not host:
+                missing.append("MYSQLHOST/MYSQL_HOST")
+            if not user:
+                missing.append("MYSQLUSER/MYSQL_USER")
+            if not database:
+                missing.append("MYSQLDATABASE/MYSQL_DATABASE")
+            raise DatabaseConfigurationError(
+                "No Railway MySQL connection is configured for this service. Set "
+                "DATABASE_URL=${{<MYSQL_SERVICE_NAME>.MYSQL_URL}} (recommended), or "
+                "reference all discrete MySQL variables. Missing: "
+                + ", ".join(missing)
+                + ". The application will not fall back to localhost."
+            )
         return None
 
     port = first_value("MYSQL_PORT", "MYSQLPORT") or "3306"
@@ -44,21 +153,30 @@ def configure_database_url(env: MutableMapping[str, str] | None = None) -> str |
         "?charset=utf8mb4"
     )
     values["DATABASE_URL"] = url
+    if is_hosted_environment(values):
+        _validate_hosted_database_url(url)
     return url
 
 
 def configure_public_url(env: MutableMapping[str, str] | None = None) -> str | None:
-    """Use Render's assigned public hostname when no explicit URL is set."""
+    """Use the hosting platform's public hostname when no URL is set."""
     values = os.environ if env is None else env
     existing = (values.get("BACKEND_PUBLIC_URL") or "").strip().rstrip("/")
     if existing:
         values["BACKEND_PUBLIC_URL"] = existing
         return existing
 
-    hostname = (values.get("RENDER_EXTERNAL_HOSTNAME") or "").strip().strip("/")
+    hostname = (
+        values.get("RAILWAY_PUBLIC_DOMAIN")
+        or values.get("RENDER_EXTERNAL_HOSTNAME")
+        or ""
+    ).strip().strip("/")
     if not hostname:
         return None
-    public_url = f"https://{hostname}"
+    if hostname.startswith(("http://", "https://")):
+        public_url = hostname.rstrip("/")
+    else:
+        public_url = f"https://{hostname}"
     values["BACKEND_PUBLIC_URL"] = public_url
     return public_url
 
@@ -102,15 +220,22 @@ def listen_port(env: MutableMapping[str, str] | None = None) -> int:
 
 
 def main() -> None:
-    configure_database_url()
+    try:
+        configured_database_url = configure_database_url()
+    except DatabaseConfigurationError as exc:
+        print(f"FATAL: {exc}", file=sys.stderr)
+        raise SystemExit(78) from exc
+
+    if configured_database_url:
+        print(f"Database target: {database_target(configured_database_url)}")
     configure_public_url()
     print("Running database migrations...")
     migrated = run_migrations()
-    require_migrations = (os.environ.get("REQUIRE_MIGRATIONS") or "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-    }
+    require_migrations_value = os.environ.get("REQUIRE_MIGRATIONS")
+    if require_migrations_value is None:
+        require_migrations = is_hosted_environment()
+    else:
+        require_migrations = require_migrations_value.strip().lower() in {"1", "true", "yes"}
     if not migrated and require_migrations:
         raise SystemExit("Database migrations are required but did not complete.")
 

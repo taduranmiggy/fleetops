@@ -13,9 +13,16 @@ Railway project
 | Setting | Value |
 |---------|--------|
 | Root Directory | `backend` |
-| Builder | **Dockerfile** (see [`railway.toml`](railway.toml)) |
-| **Start Command** | **EMPTY** in UI — config file sets `python run_server.py` |
+| Builder | **Dockerfile** (`backend/Dockerfile`) |
+| **Start Command** | **EMPTY** in UI — the Docker image runs `python run_server.py` |
+| Healthcheck Path | `/ready` |
 | Public domain port | Match Railway **Variables → PORT** (often `8080`) |
+
+For an existing service that already uses legacy Config as Code, set **Config
+File Path** to `/backend/railway.toml`; Railway does not resolve that path from
+the Root Directory. New services should mirror the healthcheck/restart settings
+in the dashboard because Railway no longer allows opting into legacy Config as
+Code.
 
 ### Still seeing `'$PORT' is not a valid integer`?
 
@@ -37,11 +44,20 @@ Starting uvicorn on port 8080...
 1. Open **fleetops** → **Variables** → **Raw Editor**
 2. Paste from [`railway.env.example`](railway.env.example)
 3. Set `SECRET_KEY` to a 32+ character random string
-4. Reference the MySQL service's generated `MYSQLHOST`, `MYSQLPORT`,
-   `MYSQLUSER`, `MYSQLPASSWORD`, and `MYSQLDATABASE` variables. The backend
-   builds `DATABASE_URL` from these values before migrations run.
+4. Set `DATABASE_URL` to the MySQL service's private `MYSQL_URL` reference.
+   Use Railway's variable picker so the service name is exact, for example:
 
-Save triggers a redeploy. Migrations run automatically on container start via `run_server.py`.
+   ```env
+   DATABASE_URL=${{MySQL.MYSQL_URL}}
+   ```
+
+   If your database tile has another name, replace `MySQL` through autocomplete.
+   The backend also accepts `MYSQL_URL` or all five discrete `MYSQL*` variables,
+   but it will never fall back to localhost in a hosted deployment.
+
+Review and deploy the staged variable changes. Migrations run automatically on
+container start via `run_server.py`; a production deployment will not start if
+the database reference is missing, local, or unavailable.
 
 ## Contact Support email (Resend)
 
@@ -66,8 +82,11 @@ Notes:
 
 | URL | Expected |
 |-----|----------|
-| `https://YOUR-RAILWAY-DOMAIN/health` | `{"status":"ok"}` |
+| `https://YOUR-RAILWAY-DOMAIN/health` | `{"status":"ok"}` (process liveness only) |
 | `https://YOUR-RAILWAY-DOMAIN/ready` | `{"status":"ready"}` |
+
+Railway's deployment healthcheck uses `/ready`, so a release is not marked
+healthy unless it can actually connect to MySQL.
 
 Run the `/health` check against the exact domain shown in Railway under
 **Settings → Networking → Public Networking**. If Railway returns its own
@@ -87,13 +106,14 @@ BACKEND_ORIGIN=https://YOUR-RAILWAY-DOMAIN
 ```
 
 1. Copy the active Railway public domain from **Settings → Networking**.
-2. In the repository root [`netlify.toml`](../netlify.toml), replace every
-   Railway hostname in `BACKEND_ORIGIN` and the `/api-proxy/*` and `/uploads/*`
-   proxy destinations. Do not add `/api` to `BACKEND_ORIGIN`.
+2. In Netlify → **Site configuration → Environment variables**, set
+   `BACKEND_ORIGIN` to that Railway HTTPS origin. Do not add `/api` or a
+   trailing slash. Production intentionally has no localhost or old-provider
+   fallback, so a missing/unsafe value fails the build clearly.
 3. In Railway Variables, set both `FRONTEND_URL` and `CORS_ORIGINS` to the
    exact Netlify production origin (`https://fleetops.netlify.app`). This is
    also used for password-reset and payment redirect links.
-4. Redeploy Railway, verify `/health`, then redeploy Netlify so its build and
+4. Redeploy Railway, verify `/ready`, then redeploy Netlify so its build and
    proxy rules use the current backend domain.
 
 The browser URL becomes `/api-proxy/auth/login`; Netlify forwards it to
@@ -105,13 +125,14 @@ own Netlify origin, routine API requests do not depend on cross-origin CORS.
 | Log / symptom | Fix |
 |---------------|-----|
 | Console says **container is not running (exited)** | Open **Deployments → View Logs** (not Console). Fix env vars below, then redeploy. |
+| `FATAL: ... will not fall back to localhost` | Remove any local `DATABASE_URL`; set `DATABASE_URL` to the MySQL service's `MYSQL_URL` reference using Railway autocomplete, then deploy the staged change. |
 | `ValidationError` on `SECRET_KEY` / `FRONTEND_URL` | Set all vars in `railway.env.example` |
-| Railway response says `Application not found` | The configured Railway hostname is detached/stale. Generate or restore the service's public domain, update every Railway hostname in `netlify.toml`, then redeploy Netlify. |
+| Railway response says `Application not found` | The configured Railway hostname is detached/stale. Generate or restore the service's public domain, update Netlify's `BACKEND_ORIGIN`, then redeploy Netlify. |
 | Browser reports CORS and the API response is Railway `404` | Fix the Railway public domain first. This response is from Railway's edge, not FastAPI, so changing `CORS_ORIGINS` alone cannot fix it. |
 | Browser reports CORS but Railway `/health` is `200` | Set Railway `FRONTEND_URL` and `CORS_ORIGINS` to the exact Netlify origin (currently `https://fleetops.netlify.app`), then redeploy Railway. |
 | `No module named 'app'` | Root Directory must be `backend` |
-| `/health` OK, `/ready` fails | Check `DATABASE_URL` uses internal `mysql.railway.internal` URL |
+| `/health` OK, `/ready` fails | Check `DATABASE_URL` references the private Railway `MYSQL_URL`; `/health` intentionally does not test MySQL. |
 | `'$PORT' is not a valid integer` | Clear Custom Start Command; remove bad `PORT` variable; use Dockerfile + `railway.toml` |
-| Login works locally but not on Netlify | Verify Railway `/health`, confirm `NEXT_PUBLIC_API_URL=/api-proxy`, and redeploy Netlify after changing `netlify.toml`. |
+| Login works locally but not on Netlify | Verify Railway `/ready`, set Netlify `BACKEND_ORIGIN` to the active Railway HTTPS origin, confirm `NEXT_PUBLIC_API_URL=/api-proxy`, and redeploy Netlify. |
 | Helper proofs upload OK but images 404 later | Mount a **Railway Volume** at `/app/uploads` (`UPLOADS_ROOT`). Ephemeral disk loses files on redeploy. |
-| Uploads 404 on Netlify | Confirm `netlify.toml` proxies `/uploads/*` to Railway `BACKEND_ORIGIN` |
+| Uploads 404 on Netlify | Confirm Netlify's `BACKEND_ORIGIN` is the active Railway origin; the Next.js `/uploads/*` route uses the same proxy setting. |
