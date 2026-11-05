@@ -37,7 +37,9 @@ Starting uvicorn on port 8080...
 1. Open **fleetops** → **Variables** → **Raw Editor**
 2. Paste from [`railway.env.example`](railway.env.example)
 3. Set `SECRET_KEY` to a 32+ character random string
-4. For `DATABASE_URL`, prefer **Add Reference** → **MySQL** → `MYSQL_URL`
+4. Reference the MySQL service's generated `MYSQLHOST`, `MYSQLPORT`,
+   `MYSQLUSER`, `MYSQLPASSWORD`, and `MYSQLDATABASE` variables. The backend
+   builds `DATABASE_URL` from these values before migrations run.
 
 Save triggers a redeploy. Migrations run automatically on container start via `run_server.py`.
 

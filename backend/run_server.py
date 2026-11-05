@@ -13,23 +13,30 @@ def configure_database_url(env: MutableMapping[str, str] | None = None) -> str |
     """Build ``DATABASE_URL`` from discrete MySQL variables when needed.
 
     Railway and external providers can continue supplying ``DATABASE_URL``
-    directly. Render's Blueprint supplies the private MySQL hostname and a
-    shared generated password as separate variables, so the process composes
-    the SQLAlchemy URL before Alembic or the application imports settings.
+    directly. Railway's MySQL plugin uses names without underscores
+    (``MYSQLHOST``, ``MYSQLUSER``, etc.), while Render's Blueprint supplies
+    underscored names, so both forms are supported.
     """
     values = os.environ if env is None else env
     existing = (values.get("DATABASE_URL") or "").strip()
     if existing:
         return existing
 
-    host = (values.get("MYSQL_HOST") or "").strip()
-    user = (values.get("MYSQL_USER") or "").strip()
-    database = (values.get("MYSQL_DATABASE") or "").strip()
+    def first_value(*names: str) -> str:
+        for name in names:
+            value = (values.get(name) or "").strip()
+            if value:
+                return value
+        return ""
+
+    host = first_value("MYSQL_HOST", "MYSQLHOST")
+    user = first_value("MYSQL_USER", "MYSQLUSER")
+    database = first_value("MYSQL_DATABASE", "MYSQLDATABASE")
     if not host or not user or not database:
         return None
 
-    port = (values.get("MYSQL_PORT") or "3306").strip() or "3306"
-    password = values.get("MYSQL_PASSWORD") or ""
+    port = first_value("MYSQL_PORT", "MYSQLPORT") or "3306"
+    password = first_value("MYSQL_PASSWORD", "MYSQLPASSWORD")
     url = (
         "mysql+pymysql://"
         f"{quote_plus(user, safe='')}:{quote_plus(password, safe='')}@"

@@ -31,6 +31,24 @@ def test_configure_database_url_builds_render_private_mysql_url() -> None:
     assert env["DATABASE_URL"] == result
 
 
+def test_configure_database_url_builds_railway_mysql_url() -> None:
+    env = {
+        "MYSQLHOST": "mysql.railway.internal",
+        "MYSQLPORT": "3306",
+        "MYSQLDATABASE": "fleetopt",
+        "MYSQLUSER": "fleetops",
+        "MYSQLPASSWORD": "p@ss/word",
+    }
+
+    result = configure_database_url(env)
+
+    assert result == (
+        "mysql+pymysql://fleetops:p%40ss%2Fword@mysql.railway.internal:3306/fleetopt"
+        "?charset=utf8mb4"
+    )
+    assert env["DATABASE_URL"] == result
+
+
 def test_configure_database_url_waits_for_complete_mysql_settings() -> None:
     env = {"MYSQL_HOST": "fleetops-mysql"}
 
