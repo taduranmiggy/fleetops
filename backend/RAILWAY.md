@@ -59,6 +59,29 @@ Review and deploy the staged variable changes. Migrations run automatically on
 container start via `run_server.py`; a production deployment will not start if
 the database reference is missing, local, or unavailable.
 
+### Bootstrap staff accounts on a new database
+
+Public registration creates customers only. For a new Railway database, add a
+temporary `BOOTSTRAP_STAFF_PASSWORD` variable to the API service, deploy the
+latest image, then open the API service Console and run:
+
+```bash
+python scripts/bootstrap_staff.py
+```
+
+This creates or resets:
+
+| Role | Email |
+|------|-------|
+| Admin | `admin@fleetops.com` |
+| Manager | `manager@fleetops.com` |
+| Dispatcher | `dispatcher@fleetops.com` |
+| Helper | `helper1@fleetops.com` |
+
+Use the temporary password to log in, then remove `BOOTSTRAP_STAFF_PASSWORD`
+from Railway Variables and redeploy. Do not put that password in the repository
+or in this chat.
+
 ## Contact Support email (Resend)
 
 On the **fleetops** service → **Variables**, add:
