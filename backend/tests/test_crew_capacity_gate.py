@@ -123,16 +123,19 @@ def test_crew_window_ignores_assignment_on_payment_rejected_booking():
 def test_crew_window_treats_non_maintenance_truck_status_as_operational():
     """A stale dispatch status must not hide a truck from customer capacity."""
     truck = SimpleNamespace(id=1, status="assigned")
-    driver = SimpleNamespace(id=10, availability_status="available")
-    helper = SimpleNamespace(id=11, availability_status="available")
+    driver = SimpleNamespace(id=10, role="driver", availability_status="available")
+    helper = SimpleNamespace(id=11, role="helper", availability_status="available")
     db = MagicMock()
     truck_query = MagicMock()
     truck_query.order_by.return_value.all.return_value = [truck]
-    driver_query = MagicMock()
-    driver_query.filter.return_value.order_by.return_value.all.return_value = [driver]
-    helper_query = MagicMock()
-    helper_query.filter.return_value.order_by.return_value.all.return_value = [helper]
-    db.query.side_effect = [truck_query, driver_query, helper_query]
+    crew_query = MagicMock()
+    crew_query.order_by.return_value.all.return_value = [
+        driver,
+        helper,
+        SimpleNamespace(id=12, role="DRIVER", availability_status="available"),
+        SimpleNamespace(id=13, role="HELPER", availability_status="available"),
+    ]
+    db.query.side_effect = [truck_query, crew_query]
 
     with (
         patch("app.services.booking_schedule._resource_free_for_interval", return_value=True),

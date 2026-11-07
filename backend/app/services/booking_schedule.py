@@ -386,7 +386,8 @@ _NON_OP_TRUCK = frozenset({"maintenance", "inactive", "under_maintenance", "in_m
 
 
 def _crew_norm(value: str | None) -> str:
-    return (value or "").strip().lower()
+    raw = (value or "").strip().lower()
+    return raw.rsplit(".", 1)[-1]
 
 
 _TERMINAL_BOOKING_VALUES = frozenset(status.value for status in BOOKING_SLOT_TERMINAL_STATUSES)
@@ -515,15 +516,18 @@ def crew_capacity_for_window(
         for t in db.query(Truck).order_by(Truck.id).all()
         if _crew_norm(t.status) not in _NON_OP_TRUCK
     ]
+    crew_users = db.query(User).order_by(User.id).all()
     drivers = [
         u
-        for u in db.query(User).filter(User.role == UserRole.DRIVER).order_by(User.id).all()
-        if _crew_norm(u.availability_status) not in _OFF_DUTY
+        for u in crew_users
+        if _crew_norm(getattr(u.role, "value", u.role)) == UserRole.DRIVER.value
+        and _crew_norm(u.availability_status) not in _OFF_DUTY
     ]
     helpers = [
         u
-        for u in db.query(User).filter(User.role == UserRole.HELPER).order_by(User.id).all()
-        if _crew_norm(u.availability_status) not in _OFF_DUTY
+        for u in crew_users
+        if _crew_norm(getattr(u.role, "value", u.role)) == UserRole.HELPER.value
+        and _crew_norm(u.availability_status) not in _OFF_DUTY
     ]
 
     free_trucks = sum(

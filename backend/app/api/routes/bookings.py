@@ -534,21 +534,20 @@ def booking_schedule_availability(
     if not active_booking_exists:
         off_duty = {"off_duty", "off-duty", "on_break", "break", "unavailable"}
         truck_count = fleet_operational_pool_size(db)
-        driver_count = int(
-            db.query(User.id)
-            .filter(
-                User.role == UserRole.DRIVER,
-                ~func.lower(func.coalesce(User.availability_status, "")).in_(off_duty),
-            )
-            .count()
+        crew_users = db.query(User).all()
+        driver_count = sum(
+            1
+            for user in crew_users
+            if str(getattr(user.role, "value", user.role)).strip().lower().rsplit(".", 1)[-1]
+            == UserRole.DRIVER.value
+            and str(user.availability_status or "").strip().lower() not in off_duty
         )
-        helper_count = int(
-            db.query(User.id)
-            .filter(
-                User.role == UserRole.HELPER,
-                ~func.lower(func.coalesce(User.availability_status, "")).in_(off_duty),
-            )
-            .count()
+        helper_count = sum(
+            1
+            for user in crew_users
+            if str(getattr(user.role, "value", user.role)).strip().lower().rsplit(".", 1)[-1]
+            == UserRole.HELPER.value
+            and str(user.availability_status or "").strip().lower() not in off_duty
         )
         free_capacity = min(truck_count, driver_count, helper_count)
         slots = {slot: free_capacity >= required_trucks for slot in BOOKING_TIME_SLOTS}
