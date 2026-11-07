@@ -389,6 +389,21 @@ def _crew_norm(value: str | None) -> str:
     return (value or "").strip().lower()
 
 
+_TERMINAL_BOOKING_VALUES = frozenset(status.value for status in BOOKING_SLOT_TERMINAL_STATUSES)
+
+
+def _booking_status_value(value: object | None) -> str:
+    """Normalize enum/string booking statuses returned by different DB dialects."""
+    if value is None:
+        return ""
+    if hasattr(value, "value"):
+        return str(getattr(value, "value")).strip().lower()
+    raw = str(value).strip().lower()
+    if "." in raw:
+        raw = raw.rsplit(".", 1)[-1]
+    return raw
+
+
 def _resource_free_for_interval(
     db: Session,
     *,
@@ -401,14 +416,10 @@ def _resource_free_for_interval(
 ) -> bool:
     """True when no non-terminal trip/assignment for this resource overlaps the window."""
     from app.models.entities import (
-        BookingStatus,
         TruckAssignment,
         TruckAssignmentStatus,
     )
 
-    terminal_booking = frozenset(
-        {BookingStatus.CANCELLED, BookingStatus.REJECTED, BookingStatus.EXPIRED}
-    )
     non_terminal_assignment = frozenset(
         {
             TruckAssignmentStatus.ASSIGNED,
@@ -420,14 +431,28 @@ def _resource_free_for_interval(
         }
     )
 
-    trip_q = db.query(Trip).filter(~Trip.status.in_(_TERMINAL_TRIP))
+    # A stale non-terminal trip attached to a terminal booking must not reserve
+    # crew capacity. This mirrors dispatch_resource_availability._active_trips,
+    # which is the source of truth used by the dispatcher dashboard.
+    trip_q = (
+        db.query(Trip, Booking)
+        .join(Booking, Booking.id == Trip.booking_id)
+        .filter(
+            ~Trip.status.in_(_TERMINAL_TRIP),
+            ~Booking.status.in_(BOOKING_SLOT_TERMINAL_STATUSES),
+        )
+    )
     if kind == "truck":
         trip_q = trip_q.filter(Trip.truck_id == resource_id)
     elif kind == "driver":
         trip_q = trip_q.filter(Trip.driver_id == resource_id)
     else:
         trip_q = trip_q.filter(Trip.helper_id == resource_id)
-    for tr in trip_q.all():
+    for tr, bk in trip_q.all():
+        # Keep the Python guard for legacy rows/dialects that return raw status
+        # strings and can bypass an enum-based SQL predicate.
+        if _booking_status_value(bk.status) in _TERMINAL_BOOKING_VALUES:
+            continue
         if exclude_booking_id is not None and tr.booking_id == exclude_booking_id:
             continue
         s, e = trip_interval(db, tr, cfg)
@@ -439,7 +464,7 @@ def _resource_free_for_interval(
         .join(Booking, Booking.id == TruckAssignment.booking_id)
         .filter(
             TruckAssignment.assignment_status.in_(non_terminal_assignment),
-            ~Booking.status.in_(terminal_booking),
+            ~Booking.status.in_(BOOKING_SLOT_TERMINAL_STATUSES),
         )
     )
     if kind == "truck":
@@ -449,6 +474,8 @@ def _resource_free_for_interval(
     else:
         assign_q = assign_q.filter(TruckAssignment.helper_id == resource_id)
     for ta, bk in assign_q.all():
+        if _booking_status_value(bk.status) in _TERMINAL_BOOKING_VALUES:
+            continue
         if exclude_booking_id is not None and bk.id == exclude_booking_id:
             continue
         s, e = booking_interval_resolved(db, bk, cfg)

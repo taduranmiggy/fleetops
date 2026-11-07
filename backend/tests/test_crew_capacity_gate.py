@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from app.models.entities import BookingStatus, TripStatus, TruckAssignmentStatus, UserRole
-from app.services.booking_schedule import CrewWindowCapacity
+from app.services.booking_schedule import CrewWindowCapacity, _resource_free_for_interval
 from app.services.dispatch_resource_availability import (
     _BUSY_ASSIGNMENT,
     _NON_TERMINAL_ASSIGNMENT,
@@ -37,6 +37,83 @@ def test_crew_capacity_message_lists_shortages():
     assert "trucks" in crew.message
     assert "helpers" in crew.message
     assert CrewWindowCapacity(2, 2, 2, 1, True).message is None
+
+
+def test_crew_window_ignores_stale_trip_on_completed_booking():
+    """A terminal parent booking releases capacity even if its trip row was not closed."""
+    completed_booking = SimpleNamespace(id=50, status=BookingStatus.COMPLETED)
+    stale_trip = SimpleNamespace(
+        id=7,
+        booking_id=50,
+        truck_id=1,
+        driver_id=10,
+        helper_id=11,
+        status=TripStatus.ASSIGNED,
+    )
+    trip_query = MagicMock()
+    trip_query.join.return_value = trip_query
+    trip_query.filter.return_value = trip_query
+    trip_query.all.return_value = [(stale_trip, completed_booking)]
+    assignment_query = MagicMock()
+    assignment_query.join.return_value = assignment_query
+    assignment_query.filter.return_value = assignment_query
+    assignment_query.all.return_value = []
+    db = MagicMock()
+    db.query.side_effect = [trip_query, assignment_query]
+
+    with (
+        patch("app.services.booking_schedule.trip_interval") as trip_interval,
+        patch("app.services.booking_schedule.booking_interval_resolved") as booking_interval,
+    ):
+        free = _resource_free_for_interval(
+            db,
+            kind="truck",
+            resource_id=1,
+            window_start=datetime(2026, 11, 18, 8, 0),
+            window_end=datetime(2026, 11, 18, 10, 0),
+            cfg=SimpleNamespace(),
+        )
+
+    assert free is True
+    trip_query.join.assert_called_once()
+    trip_interval.assert_not_called()
+    booking_interval.assert_not_called()
+
+
+def test_crew_window_ignores_assignment_on_payment_rejected_booking():
+    """Rejected-payment assignments cannot make every customer slot unavailable."""
+    rejected_booking = SimpleNamespace(id=51, status=BookingStatus.PAYMENT_REJECTED)
+    stale_assignment = SimpleNamespace(
+        id=8,
+        booking_id=51,
+        truck_id=1,
+        driver_id=10,
+        helper_id=11,
+        assignment_status=TruckAssignmentStatus.ASSIGNED,
+    )
+    trip_query = MagicMock()
+    trip_query.join.return_value = trip_query
+    trip_query.filter.return_value = trip_query
+    trip_query.all.return_value = []
+    assignment_query = MagicMock()
+    assignment_query.join.return_value = assignment_query
+    assignment_query.filter.return_value = assignment_query
+    assignment_query.all.return_value = [(stale_assignment, rejected_booking)]
+    db = MagicMock()
+    db.query.side_effect = [trip_query, assignment_query]
+
+    with patch("app.services.booking_schedule.booking_interval_resolved") as booking_interval:
+        free = _resource_free_for_interval(
+            db,
+            kind="helper",
+            resource_id=11,
+            window_start=datetime(2026, 11, 18, 8, 0),
+            window_end=datetime(2026, 11, 18, 10, 0),
+            cfg=SimpleNamespace(),
+        )
+
+    assert free is True
+    booking_interval.assert_not_called()
 
 
 def test_active_commitment_blocks_even_when_windows_do_not_overlap():
