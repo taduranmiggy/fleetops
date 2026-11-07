@@ -7,7 +7,11 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from app.models.entities import BookingStatus, TripStatus, TruckAssignmentStatus, UserRole
-from app.services.booking_schedule import CrewWindowCapacity, _resource_free_for_interval
+from app.services.booking_schedule import (
+    CrewWindowCapacity,
+    _resource_free_for_interval,
+    crew_capacity_for_window,
+)
 from app.services.dispatch_resource_availability import (
     _BUSY_ASSIGNMENT,
     _NON_TERMINAL_ASSIGNMENT,
@@ -114,6 +118,42 @@ def test_crew_window_ignores_assignment_on_payment_rejected_booking():
 
     assert free is True
     booking_interval.assert_not_called()
+
+
+def test_crew_window_treats_non_maintenance_truck_status_as_operational():
+    """A stale dispatch status must not hide a truck from customer capacity."""
+    truck = SimpleNamespace(id=1, status="assigned")
+    driver = SimpleNamespace(id=10, availability_status="available")
+    helper = SimpleNamespace(id=11, availability_status="available")
+    db = MagicMock()
+    truck_query = MagicMock()
+    truck_query.order_by.return_value.all.return_value = [truck]
+    driver_query = MagicMock()
+    driver_query.filter.return_value.order_by.return_value.all.return_value = [driver]
+    helper_query = MagicMock()
+    helper_query.filter.return_value.order_by.return_value.all.return_value = [helper]
+    db.query.side_effect = [truck_query, driver_query, helper_query]
+
+    with (
+        patch("app.services.booking_schedule._resource_free_for_interval", return_value=True),
+        patch("app.services.booking_schedule.fleet_operational_pool_size", return_value=1),
+        patch("app.services.booking_schedule.interval_for_pickup_window", return_value=(
+            datetime(2026, 11, 18, 8, 0),
+            datetime(2026, 11, 18, 10, 0),
+        )),
+    ):
+        result = crew_capacity_for_window(
+            db,
+            date(2026, 11, 18),
+            "08:00",
+            "Pickup",
+            "Dropoff",
+            required_trucks=1,
+            cfg=SimpleNamespace(),
+        )
+
+    assert result.can_book is True
+    assert result.trucks == 1
 
 
 def test_active_commitment_blocks_even_when_windows_do_not_overlap():

@@ -513,7 +513,7 @@ def crew_capacity_for_window(
     trucks = [
         t
         for t in db.query(Truck).order_by(Truck.id).all()
-        if _crew_norm(t.status) not in _NON_OP_TRUCK and _crew_norm(t.status) == "available"
+        if _crew_norm(t.status) not in _NON_OP_TRUCK
     ]
     drivers = [
         u
