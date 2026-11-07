@@ -1,4 +1,5 @@
 from datetime import date, datetime
+import logging
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
@@ -71,6 +72,7 @@ from app.services.booking_qr import booking_qr_public_fields
 
 
 router = APIRouter(prefix="/bookings", tags=["bookings"])
+logger = logging.getLogger(__name__)
 
 
 def _booking_read_payload(booking: Booking) -> dict:
@@ -527,14 +529,43 @@ def booking_schedule_availability(
         ),
         ~demo_booking_orm_filter(Booking.pickup_location, Booking.dropoff_location),
     ).first() is not None
+    bookings_on_date = db.query(Booking.id).filter(Booking.scheduled_date == scheduled_date).count()
+    crew_users = db.query(User).all()
+    active_driver_count = sum(
+        1
+        for user in crew_users
+        if str(getattr(user.role, "value", user.role)).strip().lower().rsplit(".", 1)[-1]
+        == UserRole.DRIVER.value
+        and str(user.availability_status or "").strip().lower()
+        not in {"off_duty", "off-duty", "on_break", "break", "unavailable"}
+    )
+    active_helper_count = sum(
+        1
+        for user in crew_users
+        if str(getattr(user.role, "value", user.role)).strip().lower().rsplit(".", 1)[-1]
+        == UserRole.HELPER.value
+        and str(user.availability_status or "").strip().lower()
+        not in {"off_duty", "off-duty", "on_break", "break", "unavailable"}
+    )
+    active_truck_count = fleet_operational_pool_size(db)
+    logger.info(
+        "booking availability request date=%s pickup=%s dropoff=%s active_bookings_on_date=%d "
+        "active_drivers=%d active_helpers=%d active_trucks=%d",
+        scheduled_date.isoformat(),
+        bool(pickup),
+        bool(dropoff),
+        bookings_on_date,
+        active_driver_count,
+        active_helper_count,
+        active_truck_count,
+    )
 
     # With no active workflow rows, route distance cannot affect capacity. Avoid
     # external geocoding/routing calls so a fresh demo database remains usable
     # even when map providers are slow or unavailable.
     if not active_booking_exists:
         off_duty = {"off_duty", "off-duty", "on_break", "break", "unavailable"}
-        truck_count = fleet_operational_pool_size(db)
-        crew_users = db.query(User).all()
+        truck_count = active_truck_count
         driver_count = sum(
             1
             for user in crew_users
@@ -552,11 +583,26 @@ def booking_schedule_availability(
         free_capacity = min(truck_count, driver_count, helper_count)
         slots = {slot: free_capacity >= required_trucks for slot in BOOKING_TIME_SLOTS}
         available_by_slot = {slot: free_capacity for slot in BOOKING_TIME_SLOTS}
+        logger.info(
+            "booking availability fresh-pool date=%s active_drivers=%d active_helpers=%d "
+            "active_trucks=%d capacity=%s",
+            scheduled_date.isoformat(),
+            active_driver_count,
+            active_helper_count,
+            active_truck_count,
+            available_by_slot,
+        )
         return BookingScheduleAvailabilityRead(
             scheduled_date=scheduled_date,
             slots=slots,
             required_trucks=required_trucks,
             available_trucks_by_slot=available_by_slot,
+            availability_message=(
+                "No active drivers, helpers, or trucks are configured. "
+                "Run the database seed/migration before accepting bookings."
+                if min(active_driver_count, active_helper_count, active_truck_count) <= 0
+                else None
+            ),
         )
 
     if has_route:
@@ -607,12 +653,25 @@ def booking_schedule_availability(
             crew.drivers,
             crew.helpers,
         )
+    logger.info(
+        "booking availability date=%s active_bookings_on_date=%d capacity=%s slots=%s",
+        scheduled_date.isoformat(),
+        bookings_on_date,
+        available_by_slot,
+        slots,
+    )
 
     return BookingScheduleAvailabilityRead(
         scheduled_date=scheduled_date,
         slots=slots,
         required_trucks=required_trucks,
         available_trucks_by_slot=available_by_slot,
+        availability_message=(
+            "No active drivers, helpers, or trucks are configured. "
+            "Run the database seed/migration before accepting bookings."
+            if min(active_driver_count, active_helper_count, active_truck_count) <= 0
+            else None
+        ),
     )
 
 

@@ -190,6 +190,7 @@ export default function CostCalculator({
     })
       .then((res) => {
         if (cancelled) return;
+        setSlotsFetchError(res.availability_message ?? null);
         const next: Record<string, boolean> = {};
         for (const s of BOOKING_TIME_SLOTS) {
           next[s] = res.slots?.[s] !== false;

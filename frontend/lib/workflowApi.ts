@@ -830,6 +830,7 @@ export const WorkflowApi = {
       slots: Record<string, boolean>;
       required_trucks: number;
       available_trucks_by_slot: Record<string, number>;
+      availability_message?: string | null;
     }>(
       `/bookings/schedule-availability?${q.toString()}`,
     );

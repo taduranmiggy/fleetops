@@ -97,6 +97,7 @@ class BookingScheduleAvailabilityRead(BaseModel):
     slots: dict[str, bool]
     required_trucks: int = 1
     available_trucks_by_slot: dict[str, int] = {}
+    availability_message: str | None = None
 
 
 class BookingRead(BaseModel):
